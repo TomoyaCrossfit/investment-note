@@ -205,6 +205,13 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkM
     </div>
     <div class="sp-hint">Claude AI で企業リサーチを行います。<a href="https://console.anthropic.com/" target="_blank" rel="noopener">console.anthropic.com</a> で取得</div>
 
+    <div class="sp-section">BRAVE SEARCH（オプション）</div>
+    <div class="sp-row">
+      <span class="sp-label">API KEY</span>
+      <input type="password" class="sp-input" id="sp-brave" placeholder="BSA...">
+    </div>
+    <div class="sp-hint">最新ニュース・決算情報をリアルタイム検索してClaudeに渡します。<a href="https://brave.com/search/api/" target="_blank" rel="noopener">brave.com/search/api</a> で取得（無料 2,000回/月）</div>
+
     <div class="sp-section">NOTION（オプション）</div>
     <div class="sp-row">
       <span class="sp-label">TOKEN</span>
@@ -303,6 +310,7 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkM
 // Constants
 // ─────────────────────────────────────────────
 const KEY_ANT    = 'inv_anthropic';
+const KEY_BRAVE  = 'inv_brave_key';
 const KEY_NTOKEN = 'inv_notion_token';
 const KEY_NDBID  = 'inv_notion_db';
 const KEY_MEMOS  = 'inv_memos';
@@ -321,9 +329,11 @@ let memos         = {};    // ticker -> memo object
 function init() {
   memos = JSON.parse(localStorage.getItem(KEY_MEMOS) || '{}');
   const ant   = localStorage.getItem(KEY_ANT)    || '';
+  const brave = localStorage.getItem(KEY_BRAVE)  || '';
   const nTok  = localStorage.getItem(KEY_NTOKEN) || '';
   const nDb   = localStorage.getItem(KEY_NDBID)  || '';
   if (ant)   document.getElementById('sp-ant').value          = ant;
+  if (brave) document.getElementById('sp-brave').value        = brave;
   if (nTok)  document.getElementById('sp-notion-token').value = nTok;
   if (nDb)   document.getElementById('sp-notion-db').value    = nDb;
   renderSavedList();
@@ -339,13 +349,50 @@ function closeSettingsOnBg(e) {
   if (e.target === document.getElementById('settings-overlay')) toggleSettings();
 }
 function saveSettings() {
-  const ant  = document.getElementById('sp-ant').value.trim();
-  const nTok = document.getElementById('sp-notion-token').value.trim();
-  const nDb  = document.getElementById('sp-notion-db').value.trim();
-  if (ant)  localStorage.setItem(KEY_ANT,    ant);
-  if (nTok) localStorage.setItem(KEY_NTOKEN, nTok);
-  if (nDb)  localStorage.setItem(KEY_NDBID,  nDb);
+  const ant   = document.getElementById('sp-ant').value.trim();
+  const brave = document.getElementById('sp-brave').value.trim();
+  const nTok  = document.getElementById('sp-notion-token').value.trim();
+  const nDb   = document.getElementById('sp-notion-db').value.trim();
+  if (ant)   localStorage.setItem(KEY_ANT,    ant);
+  if (brave) localStorage.setItem(KEY_BRAVE,  brave);
+  if (nTok)  localStorage.setItem(KEY_NTOKEN, nTok);
+  if (nDb)   localStorage.setItem(KEY_NDBID,  nDb);
   toggleSettings();
+}
+
+// ─────────────────────────────────────────────
+// Brave Search
+// ─────────────────────────────────────────────
+async function searchBrave(query) {
+  const braveKey = localStorage.getItem(KEY_BRAVE);
+  if (!braveKey) return null;
+
+  const q   = encodeURIComponent(`${query} 株式 決算 業績 ニュース`);
+  const url = `https://api.search.brave.com/res/v1/web/search?q=${q}&count=6&search_lang=ja&country=JP`;
+  const headers = { 'X-Subscription-Token': braveKey, 'Accept': 'application/json' };
+
+  try {
+    const r = await fetch(url, { headers });
+    if (r.ok) return r.json();
+    if (r.status !== 0) throw new Error(`HTTP ${r.status}`);
+  } catch (e) {
+    if (!e.message.startsWith('HTTP')) {
+      // CORS → proxy
+      const r2 = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`, { headers });
+      if (!r2.ok) throw new Error(`Brave HTTP ${r2.status}`);
+      return r2.json();
+    }
+    throw e;
+  }
+  return null;
+}
+
+function formatSearchResults(data) {
+  const results = data?.web?.results || [];
+  if (!results.length) return '';
+  return results.slice(0, 6).map((r, i) =>
+    `[${i + 1}] ${r.title}\n概要: ${r.description || '（なし）'}\n日付: ${r.age || '不明'}\nURL: ${r.url}`
+  ).join('\n\n');
 }
 
 // ─────────────────────────────────────────────
@@ -362,12 +409,34 @@ async function doResearch() {
   const rContent     = document.getElementById('research-content');
   const btn          = document.getElementById('search-btn');
 
-  rPlaceholder.innerHTML = `<div class="status-box"><div class="spinner"></div>Claude AI がリサーチ中...</div>`;
-  rPlaceholder.style.display = 'flex';
   rContent.style.display = 'none';
   btn.disabled = true;
 
-  const prompt = `"${query}"についてリサーチしてください。投資メモ用に以下のJSON形式のみで返答してください（説明文不要）。
+  // Step 1: Brave Search（キーがあれば）
+  let searchContext = '';
+  const hasBrave = !!localStorage.getItem(KEY_BRAVE);
+  if (hasBrave) {
+    rPlaceholder.innerHTML = `<div class="status-box"><div class="spinner"></div>Brave Search で最新情報を検索中...</div>`;
+    rPlaceholder.style.display = 'flex';
+    try {
+      const braveData = await searchBrave(query);
+      searchContext = formatSearchResults(braveData);
+    } catch (e) {
+      console.warn('Brave Search failed:', e.message);
+    }
+  }
+
+  // Step 2: Claude
+  rPlaceholder.innerHTML = `<div class="status-box"><div class="spinner"></div>Claude AI が分析中${hasBrave ? '（最新情報を参照）' : ''}...</div>`;
+  rPlaceholder.style.display = 'flex';
+
+  const searchSection = searchContext
+    ? `\n\n【最新検索情報（Brave Search APIより取得）】\n以下の情報を踏まえて分析してください。財務数値は検索結果の最新値を優先してください：\n\n${searchContext}\n`
+    : '';
+
+  const prompt = `"${query}"についてリサーチしてください。投資メモ用に以下のJSON形式のみで返答してください（説明文不要）。${searchSection}
+
+【重要】ティッカーシンボルは必ずその企業固有の正確なものを返してください。例えばホンダ(本田技研工業)は7267.T、トヨタは7203.T、ソニーは6758.T です。企業名とティッカーが一致しない回答は絶対に避けてください。
 
 【重要】ティッカーシンボルは必ずその企業固有の正確なものを返してください。例えばホンダ(本田技研工業)は7267.T、トヨタは7203.T、ソニーは6758.T です。企業名とティッカーが一致しない回答は絶対に避けてください。
 
