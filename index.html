@@ -367,13 +367,15 @@ async function doResearch() {
   rContent.style.display = 'none';
   btn.disabled = true;
 
-  const prompt = `"${query}"についてリサーチしてください。投資メモ用に以下のJSON形式のみで返答してください（説明文不要）：
+  const prompt = `"${query}"についてリサーチしてください。投資メモ用に以下のJSON形式のみで返答してください（説明文不要）。
+
+【重要】ティッカーシンボルは必ずその企業固有の正確なものを返してください。例えばホンダ(本田技研工業)は7267.T、トヨタは7203.T、ソニーは6758.T です。企業名とティッカーが一致しない回答は絶対に避けてください。
 
 {
   "found": true,
   "company_name": "会社名（日本語）",
   "company_name_en": "会社名（英語）",
-  "ticker": "ティッカー（例: 7203.T, AAPL）",
+  "ticker": "その企業固有の正確なティッカー（例: 7267.T=ホンダ, 7203.T=トヨタ, AAPL=Apple）",
   "market": "上場市場",
   "sector": "業種",
   "country": "JP or US",
@@ -394,7 +396,7 @@ async function doResearch() {
     "themes": ["関連投資テーマ1", "テーマ2", "テーマ3"],
     "questions": ["投資前に調べるべき質問1", "質問2", "質問3"]
   },
-  "yahoo_url": "https://finance.yahoo.co.jp/quote/7203.T（JP株のみ）",
+  "yahoo_url": "https://finance.yahoo.co.jp/quote/（そのティッカー）（JP株のみ。ホンダなら https://finance.yahoo.co.jp/quote/7267.T）",
   "data_note": "データは学習データに基づく概算。実際の投資判断には公式情報を参照のこと。"
 }
 
@@ -410,8 +412,8 @@ async function doResearch() {
         'anthropic-dangerous-direct-browser-access': 'true',
       },
       body: JSON.stringify({
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 1500,
+        model: 'claude-sonnet-4-6',
+        max_tokens: 1800,
         messages: [{ role: 'user', content: prompt }],
       }),
     });
