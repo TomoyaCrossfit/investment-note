@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Investment Note</title>
+<meta name="theme-color" content="#0d1117">
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+:root {
+  --bg:      #0d1117;
+  --surf:    #161b22;
+  --surf2:   #1c2128;
+  --border:  #30363d;
+  --border2: #21262d;
+  --text:    #e6edf3;
+  --text2:   #8b949e;
+  --text3:   #656d76;
+  --accent:  #58a6ff;
+  --green:   #3fb950;
+  --red:     #f85149;
+  --yellow:  #d29922;
+  --orange:  #f0883e;
+  --purple:  #bc8cff;
+}
+body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif; font-size:14px; min-height:100vh; }
+
+/* ── Header ── */
+.header { display:flex; align-items:center; justify-content:space-between; padding:12px 20px; border-bottom:1px solid var(--border); background:var(--surf); position:sticky; top:0; z-index:100; }
+.header-brand { display:flex; align-items:baseline; gap:10px; }
+.header-title { font-size:16px; font-weight:700; letter-spacing:-0.3px; }
+.header-sub   { font-size:10px; color:var(--text3); font-family:monospace; letter-spacing:1.5px; }
+.hdr-btn { background:none; border:1px solid var(--border); color:var(--text2); border-radius:6px; padding:5px 12px; font-size:12px; cursor:pointer; }
+.hdr-btn:hover { border-color:var(--accent); color:var(--accent); }
+
+/* ── Settings overlay ── */
+.settings-overlay { display:none; position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:200; }
+.settings-overlay.open { display:flex; align-items:flex-start; justify-content:flex-end; }
+.settings-panel { background:var(--surf); border-left:1px solid var(--border); width:360px; max-width:95vw; height:100vh; overflow-y:auto; padding:20px; }
+.sp-title { font-size:13px; font-weight:700; letter-spacing:1px; margin-bottom:18px; color:var(--text2); font-family:monospace; }
+.sp-section { border-top:1px solid var(--border2); padding-top:14px; margin-top:14px; font-family:monospace; font-size:10px; color:var(--text3); letter-spacing:2px; margin-bottom:10px; }
+.sp-row { display:flex; align-items:center; gap:8px; margin-bottom:8px; }
+.sp-label { font-size:10px; font-family:monospace; color:var(--text3); letter-spacing:1px; width:70px; flex-shrink:0; }
+.sp-input { flex:1; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:6px 10px; color:var(--text); font-size:12px; font-family:monospace; outline:none; }
+.sp-input:focus { border-color:var(--accent); }
+.sp-hint { font-size:11px; color:var(--text3); line-height:1.5; margin-top:4px; }
+.sp-hint a { color:var(--accent); }
+.sp-btn { background:var(--accent); color:#0d1117; border:none; border-radius:6px; padding:7px 16px; font-size:12px; font-weight:700; cursor:pointer; margin-top:10px; }
+.sp-btn:hover { opacity:.85; }
+.sp-close { position:absolute; top:16px; right:20px; background:none; border:none; color:var(--text3); font-size:20px; cursor:pointer; }
+
+/* ── Search ── */
+.search-wrap { padding:16px 20px; background:var(--surf); border-bottom:1px solid var(--border2); }
+.search-row { display:flex; gap:8px; }
+.search-input { flex:1; background:var(--bg); border:1px solid var(--border); border-radius:8px; padding:9px 16px; color:var(--text); font-size:14px; font-family:monospace; outline:none; }
+.search-input:focus { border-color:var(--accent); }
+.search-btn { background:var(--accent); color:#0d1117; border:none; border-radius:8px; padding:9px 22px; font-size:13px; font-weight:700; cursor:pointer; white-space:nowrap; }
+.search-btn:hover { opacity:.85; }
+.search-btn:disabled { opacity:.4; cursor:default; }
+
+/* ── Main two-column ── */
+.main { display:grid; grid-template-columns:1fr 1fr; gap:0; min-height:calc(100vh - 200px); }
+@media(max-width:800px) { .main { grid-template-columns:1fr; } }
+
+/* research panel */
+.research-panel { border-right:1px solid var(--border2); padding:20px; overflow-y:auto; }
+.memo-panel { padding:20px; overflow-y:auto; }
+
+/* placeholder */
+.panel-placeholder { display:flex; align-items:center; justify-content:center; height:300px; color:var(--text3); font-size:13px; }
+
+/* status */
+.status-box { display:flex; align-items:center; gap:10px; padding:12px 16px; background:var(--surf2); border-radius:8px; margin-bottom:16px; font-size:13px; color:var(--text2); }
+.spinner { width:16px; height:16px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin .7s linear infinite; flex-shrink:0; }
+@keyframes spin { to { transform:rotate(360deg); } }
+
+/* ── Research result ── */
+.r-company { margin-bottom:16px; }
+.r-company-name { font-size:18px; font-weight:700; letter-spacing:-0.3px; }
+.r-company-en { font-size:12px; color:var(--text3); margin-top:2px; }
+.r-tags { display:flex; flex-wrap:wrap; gap:6px; margin-top:8px; }
+.r-tag { font-size:10px; font-family:monospace; background:var(--surf2); border:1px solid var(--border2); border-radius:4px; padding:2px 8px; color:var(--text2); }
+.r-tag.accent { border-color:var(--accent); color:var(--accent); }
+
+.r-section { margin-top:18px; }
+.r-sec-label { font-size:10px; font-family:monospace; letter-spacing:2px; color:var(--text3); border-bottom:1px solid var(--border2); padding-bottom:6px; margin-bottom:10px; }
+.r-overview { font-size:13px; line-height:1.7; color:var(--text2); }
+
+.r-segments { display:flex; flex-wrap:wrap; gap:6px; }
+.r-seg { font-size:12px; background:var(--surf2); border-radius:6px; padding:4px 10px; color:var(--text2); }
+
+.r-metrics-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.r-metric { background:var(--surf2); border-radius:8px; padding:10px 12px; }
+.r-metric-label { font-size:10px; color:var(--text3); font-family:monospace; letter-spacing:0.5px; margin-bottom:4px; }
+.r-metric-value { font-size:15px; font-weight:700; font-family:monospace; color:var(--text); }
+
+.r-list { list-style:none; }
+.r-list li { padding:5px 0; font-size:13px; color:var(--text2); border-bottom:1px solid var(--border2); line-height:1.5; }
+.r-list li:last-child { border-bottom:none; }
+.r-list li::before { content:'▸ '; color:var(--accent); }
+
+.r-assoc-block { background:var(--surf2); border-radius:8px; padding:12px 14px; margin-bottom:10px; }
+.r-assoc-title { font-size:10px; font-family:monospace; letter-spacing:1.5px; color:var(--text3); margin-bottom:8px; }
+.r-peer-chips { display:flex; flex-wrap:wrap; gap:6px; }
+.r-peer-chip { font-size:11px; font-family:monospace; background:var(--surf); border:1px solid var(--border); border-radius:4px; padding:2px 8px; color:var(--text2); cursor:pointer; }
+.r-peer-chip:hover { border-color:var(--accent); color:var(--accent); }
+.r-theme { font-size:12px; background:rgba(188,140,255,.12); border:1px solid rgba(188,140,255,.3); border-radius:4px; padding:2px 8px; color:var(--purple); }
+.r-question { font-size:12px; color:var(--text2); padding:3px 0; line-height:1.5; }
+.r-question::before { content:'？ '; color:var(--yellow); }
+
+.r-data-note { font-size:11px; color:var(--text3); margin-top:16px; font-style:italic; }
+
+/* ── Yahoo link ── */
+.r-link-btn { display:inline-block; font-size:11px; background:var(--surf2); border:1px solid var(--border); border-radius:6px; padding:4px 12px; color:var(--text2); text-decoration:none; margin-top:8px; }
+.r-link-btn:hover { border-color:var(--accent); color:var(--accent); }
+
+/* ── Memo editor ── */
+.memo-section-label { font-size:10px; font-family:monospace; letter-spacing:2px; color:var(--text3); margin-bottom:10px; margin-top:18px; }
+.memo-section-label:first-child { margin-top:0; }
+
+/* rating stars */
+.stars { display:flex; gap:4px; margin-bottom:6px; }
+.star { font-size:24px; cursor:pointer; color:var(--border); transition:color .15s; user-select:none; }
+.star.on { color:var(--yellow); }
+.star:hover { color:var(--yellow); }
+
+/* form fields */
+.memo-row { display:flex; gap:8px; align-items:center; margin-bottom:8px; }
+.memo-label { font-size:11px; color:var(--text3); width:80px; flex-shrink:0; font-family:monospace; }
+.memo-input { flex:1; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:7px 10px; color:var(--text); font-size:13px; outline:none; }
+.memo-input:focus { border-color:var(--accent); }
+.memo-textarea { width:100%; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:8px 10px; color:var(--text); font-size:13px; outline:none; resize:vertical; min-height:80px; line-height:1.6; font-family:inherit; }
+.memo-textarea:focus { border-color:var(--accent); }
+.memo-textarea.tall { min-height:120px; }
+
+/* tag input */
+.tag-wrap { display:flex; flex-wrap:wrap; gap:5px; background:var(--bg); border:1px solid var(--border); border-radius:6px; padding:5px 8px; cursor:text; }
+.tag-wrap:focus-within { border-color:var(--accent); }
+.tag-item { display:inline-flex; align-items:center; gap:4px; background:var(--surf2); border:1px solid var(--border); border-radius:12px; padding:2px 8px; font-size:11px; font-family:monospace; color:var(--text2); }
+.tag-rm { cursor:pointer; color:var(--text3); font-size:13px; line-height:1; }
+.tag-rm:hover { color:var(--red); }
+.tag-input { border:none; background:transparent; color:var(--text); font-size:12px; outline:none; min-width:80px; flex:1; }
+
+/* action buttons */
+.memo-actions { display:flex; gap:8px; margin-top:16px; flex-wrap:wrap; }
+.btn-save { background:var(--green); color:#0d1117; border:none; border-radius:8px; padding:9px 20px; font-size:13px; font-weight:700; cursor:pointer; }
+.btn-save:hover { opacity:.85; }
+.btn-notion { background:none; border:1px solid var(--border); color:var(--text2); border-radius:8px; padding:9px 20px; font-size:13px; cursor:pointer; display:flex; align-items:center; gap:6px; }
+.btn-notion:hover { border-color:var(--text2); color:var(--text); }
+.btn-copy { background:none; border:1px solid var(--border); color:var(--text2); border-radius:8px; padding:9px 16px; font-size:13px; cursor:pointer; }
+.btn-copy:hover { border-color:var(--accent); color:var(--accent); }
+.btn-clear { background:none; border:none; color:var(--text3); font-size:12px; cursor:pointer; padding:9px 0; }
+.btn-clear:hover { color:var(--red); }
+
+.save-msg { font-size:12px; color:var(--green); display:none; }
+.save-msg.show { display:inline; }
+
+/* ── Saved memos ── */
+.saved-section { border-top:1px solid var(--border); padding:20px; }
+.saved-header { font-size:10px; font-family:monospace; letter-spacing:2px; color:var(--text3); margin-bottom:14px; }
+.saved-empty { color:var(--text3); font-size:13px; }
+.saved-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:12px; }
+.memo-card { background:var(--surf); border:1px solid var(--border2); border-radius:10px; padding:14px 16px; cursor:pointer; transition:border-color .15s; position:relative; }
+.memo-card:hover { border-color:var(--accent); }
+.mc-ticker { font-family:monospace; font-size:12px; font-weight:700; letter-spacing:1px; color:var(--accent); }
+.mc-name { font-size:14px; font-weight:600; margin-top:2px; }
+.mc-stars { color:var(--yellow); font-size:13px; margin-top:4px; }
+.mc-snippet { font-size:12px; color:var(--text3); margin-top:6px; line-height:1.5; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; }
+.mc-date { font-size:10px; color:var(--text3); font-family:monospace; margin-top:8px; }
+.mc-tags { display:flex; flex-wrap:wrap; gap:4px; margin-top:6px; }
+.mc-tag { font-size:10px; background:var(--surf2); border:1px solid var(--border2); border-radius:3px; padding:1px 6px; color:var(--text3); font-family:monospace; }
+.mc-del { position:absolute; top:10px; right:10px; background:none; border:none; color:var(--text3); cursor:pointer; font-size:14px; padding:2px 5px; border-radius:4px; opacity:0; transition:opacity .15s; }
+.memo-card:hover .mc-del { opacity:1; }
+.mc-del:hover { color:var(--red); }
+.mc-notion-dot { position:absolute; bottom:10px; right:10px; width:8px; height:8px; border-radius:50%; background:var(--green); title:"Notion同期済み"; }
+
+/* ── Notion status ── */
+.notion-msg { font-size:12px; margin-top:8px; padding:8px 12px; border-radius:6px; }
+.notion-msg.ok  { background:rgba(63,185,80,.1); border:1px solid rgba(63,185,80,.3); color:var(--green); }
+.notion-msg.err { background:rgba(248,81,73,.1); border:1px solid rgba(248,81,73,.3); color:var(--red); }
+.notion-setup { font-size:12px; color:var(--text3); margin-top:8px; }
+.notion-setup a { color:var(--accent); }
+</style>
+</head>
+<body>
+
+<!-- Header -->
+<div class="header">
+  <div class="header-brand">
+    <div class="header-title">Investment Note</div>
+    <div class="header-sub">AI STOCK RESEARCH MEMO</div>
+  </div>
+  <button class="hdr-btn" onclick="toggleSettings()">⚙ 設定</button>
+</div>
+
+<!-- Settings overlay -->
+<div class="settings-overlay" id="settings-overlay" onclick="closeSettingsOnBg(event)">
+  <div class="settings-panel">
+    <div class="sp-title">⚙ SETTINGS</div>
+
+    <div class="sp-section">ANTHROPIC</div>
+    <div class="sp-row">
+      <span class="sp-label">API KEY</span>
+      <input type="password" class="sp-input" id="sp-ant" placeholder="sk-ant-...">
+    </div>
+    <div class="sp-hint">Claude AI で企業リサーチを行います。<a href="https://console.anthropic.com/" target="_blank" rel="noopener">console.anthropic.com</a> で取得</div>
+
+    <div class="sp-section">NOTION（オプション）</div>
+    <div class="sp-row">
+      <span class="sp-label">TOKEN</span>
+      <input type="password" class="sp-input" id="sp-notion-token" placeholder="secret_...">
+    </div>
+    <div class="sp-row" style="margin-top:6px">
+      <span class="sp-label">DB ID</span>
+      <input type="text" class="sp-input" id="sp-notion-db" placeholder="32桁のデータベースID">
+    </div>
+    <div class="sp-hint" style="margin-top:6px">
+      <strong style="color:var(--text2)">Notion連携の設定手順:</strong><br>
+      1. <a href="https://www.notion.so/my-integrations" target="_blank" rel="noopener">notion.so/my-integrations</a> でインテグレーション作成<br>
+      2. 「内部インテグレーション」→ トークンをコピー<br>
+      3. Notionでデータベースページを作成し「接続を追加」でインテグレーションを追加<br>
+      4. データベースURLの末尾32文字がデータベースID<br><br>
+      <strong style="color:var(--text2)">必要な列（プロパティ）:</strong><br>
+      名前(title)・Ticker(text)・セクター(select)・評価(select)・目標株価(number)・タグ(multi_select)・日付(date)
+    </div>
+
+    <button class="sp-btn" onclick="saveSettings()">保存して閉じる</button>
+  </div>
+</div>
+
+<!-- Search -->
+<div class="search-wrap">
+  <div class="search-row">
+    <input class="search-input" id="search-input"
+      placeholder="企業名またはティッカー（例: トヨタ, 7203.T, Apple, AAPL）"
+      onkeydown="if(event.key==='Enter') doResearch()">
+    <button class="search-btn" id="search-btn" onclick="doResearch()">🔍 リサーチ</button>
+  </div>
+</div>
+
+<!-- Main two-column -->
+<div class="main" id="main-area" style="display:none">
+  <!-- Research panel -->
+  <div class="research-panel" id="research-panel">
+    <div class="panel-placeholder" id="research-placeholder">← リサーチ結果がここに表示されます</div>
+    <div id="research-content" style="display:none"></div>
+  </div>
+
+  <!-- Memo editor -->
+  <div class="memo-panel">
+    <div class="memo-section-label">評価</div>
+    <div class="stars" id="stars">
+      <span class="star" onclick="setRating(1)">★</span>
+      <span class="star" onclick="setRating(2)">★</span>
+      <span class="star" onclick="setRating(3)">★</span>
+      <span class="star" onclick="setRating(4)">★</span>
+      <span class="star" onclick="setRating(5)">★</span>
+    </div>
+
+    <div class="memo-row">
+      <span class="memo-label">目標株価</span>
+      <input type="number" class="memo-input" id="m-price" placeholder="例: 3500">
+    </div>
+
+    <div class="memo-section-label" style="margin-top:14px">タグ</div>
+    <div class="tag-wrap" id="tag-wrap" onclick="focusTagInput()">
+      <input class="tag-input" id="tag-input" placeholder="タグを入力してEnter" onkeydown="handleTagKey(event)">
+    </div>
+
+    <div class="memo-section-label">投資テーゼ</div>
+    <textarea class="memo-textarea" id="m-thesis" placeholder="なぜこの企業に投資したいか・できるか"></textarea>
+
+    <div class="memo-section-label">懸念点・リスク</div>
+    <textarea class="memo-textarea" id="m-risks" placeholder="気になるリスクや不安要素"></textarea>
+
+    <div class="memo-section-label">自由メモ</div>
+    <textarea class="memo-textarea tall" id="m-notes" placeholder="気づいたこと、調べたこと、決算メモなど自由に"></textarea>
+
+    <div class="memo-actions">
+      <button class="btn-save" onclick="saveMemo()">💾 保存</button>
+      <button class="btn-notion" id="btn-notion" onclick="pushToNotion()">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><rect width="14" height="14" rx="2" fill="white"/><text x="2" y="11" font-size="9" fill="#000">N</text></svg>
+        Notionへ保存
+      </button>
+      <button class="btn-copy" onclick="copyMarkdown()" title="Markdown形式でコピー">📋 コピー</button>
+      <button class="btn-clear" onclick="clearEditor()">クリア</button>
+    </div>
+    <span class="save-msg" id="save-msg">✓ 保存しました</span>
+    <div id="notion-msg"></div>
+  </div>
+</div>
+
+<!-- Saved memos -->
+<div class="saved-section" id="saved-section">
+  <div class="saved-header">SAVED MEMOS</div>
+  <div id="saved-list">
+    <div class="saved-empty">まだメモがありません。銘柄を検索してメモを書いてみましょう。</div>
+  </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────
+// Constants
+// ─────────────────────────────────────────────
+const KEY_ANT    = 'inv_anthropic';
+const KEY_NTOKEN = 'inv_notion_token';
+const KEY_NDBID  = 'inv_notion_db';
+const KEY_MEMOS  = 'inv_memos';
+
+// ─────────────────────────────────────────────
+// State
+// ─────────────────────────────────────────────
+let currentRating = 0;
+let currentTags   = [];
+let currentData   = null;  // last AI research result
+let memos         = {};    // ticker -> memo object
+
+// ─────────────────────────────────────────────
+// Init
+// ─────────────────────────────────────────────
+function init() {
+  memos = JSON.parse(localStorage.getItem(KEY_MEMOS) || '{}');
+  const ant   = localStorage.getItem(KEY_ANT)    || '';
+  const nTok  = localStorage.getItem(KEY_NTOKEN) || '';
+  const nDb   = localStorage.getItem(KEY_NDBID)  || '';
+  if (ant)   document.getElementById('sp-ant').value          = ant;
+  if (nTok)  document.getElementById('sp-notion-token').value = nTok;
+  if (nDb)   document.getElementById('sp-notion-db').value    = nDb;
+  renderSavedList();
+}
+
+// ─────────────────────────────────────────────
+// Settings
+// ─────────────────────────────────────────────
+function toggleSettings() {
+  document.getElementById('settings-overlay').classList.toggle('open');
+}
+function closeSettingsOnBg(e) {
+  if (e.target === document.getElementById('settings-overlay')) toggleSettings();
+}
+function saveSettings() {
+  const ant  = document.getElementById('sp-ant').value.trim();
+  const nTok = document.getElementById('sp-notion-token').value.trim();
+  const nDb  = document.getElementById('sp-notion-db').value.trim();
+  if (ant)  localStorage.setItem(KEY_ANT,    ant);
+  if (nTok) localStorage.setItem(KEY_NTOKEN, nTok);
+  if (nDb)  localStorage.setItem(KEY_NDBID,  nDb);
+  toggleSettings();
+}
+
+// ─────────────────────────────────────────────
+// Research (Claude API)
+// ─────────────────────────────────────────────
+async function doResearch() {
+  const query = document.getElementById('search-input').value.trim();
+  if (!query) return;
+  const apiKey = localStorage.getItem(KEY_ANT);
+  if (!apiKey) { alert('設定から Anthropic API キーを入力してください。'); return; }
+
+  document.getElementById('main-area').style.display = 'grid';
+  const rPlaceholder = document.getElementById('research-placeholder');
+  const rContent     = document.getElementById('research-content');
+  const btn          = document.getElementById('search-btn');
+
+  rPlaceholder.innerHTML = `<div class="status-box"><div class="spinner"></div>Claude AI がリサーチ中...</div>`;
+  rPlaceholder.style.display = 'flex';
+  rContent.style.display = 'none';
+  btn.disabled = true;
+
+  const prompt = `"${query}"についてリサーチしてください。投資メモ用に以下のJSON形式のみで返答してください（説明文不要）：
+
+{
+  "found": true,
+  "company_name": "会社名（日本語）",
+  "company_name_en": "会社名（英語）",
+  "ticker": "ティッカー（例: 7203.T, AAPL）",
+  "market": "上場市場",
+  "sector": "業種",
+  "country": "JP or US",
+  "overview": "事業概要（200字以内・日本語）",
+  "business_segments": ["主要事業1", "主要事業2", "主要事業3"],
+  "financial_snapshot": {
+    "revenue": "売上規模（例: 約45兆円）",
+    "market_cap": "時価総額（例: 約35兆円）",
+    "per": "PER概算（例: 8.5倍）",
+    "roe": "ROE概算（例: 14%）",
+    "dividend_yield": "配当利回り概算（例: 2.8%）",
+    "dividend_per_share": "1株配当概算（例: 60円 または $1.20）"
+  },
+  "investment_points": ["投資ポイント1（具体的に）", "投資ポイント2", "投資ポイント3"],
+  "risks": ["リスク1（具体的に）", "リスク2", "リスク3"],
+  "associations": {
+    "peers": [{"ticker": "競合ティッカー", "name": "競合企業名"}, {"ticker": "...", "name": "..."}],
+    "themes": ["関連投資テーマ1", "テーマ2", "テーマ3"],
+    "questions": ["投資前に調べるべき質問1", "質問2", "質問3"]
+  },
+  "yahoo_url": "https://finance.yahoo.co.jp/quote/7203.T（JP株のみ）",
+  "data_note": "データは学習データに基づく概算。実際の投資判断には公式情報を参照のこと。"
+}
+
+見つからない場合: { "found": false, "message": "理由（日本語）" }`;
+
+  try {
+    const res  = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 1500,
+        messages: [{ role: 'user', content: prompt }],
+      }),
+    });
+    if (!res.ok) throw new Error(`API error: ${res.status}`);
+    const json = await res.json();
+    const raw  = json.content?.[0]?.text || '';
+    const match = raw.match(/\{[\s\S]*\}/);
+    if (!match) throw new Error('JSONが見つかりませんでした');
+    const data = JSON.parse(match[0]);
+
+    if (!data.found) {
+      rPlaceholder.innerHTML = `<div style="color:var(--red);text-align:center;padding:20px">${esc(data.message || '見つかりませんでした')}</div>`;
+      btn.disabled = false;
+      return;
+    }
+
+    currentData = data;
+    renderResearch(data);
+    prefillMemo(data);
+
+  } catch (e) {
+    rPlaceholder.innerHTML = `<div style="color:var(--red);padding:16px">エラー: ${esc(e.message)}</div>`;
+  }
+  btn.disabled = false;
+}
+
+// ─────────────────────────────────────────────
+// Render research
+// ─────────────────────────────────────────────
+function renderResearch(d) {
+  const rPlaceholder = document.getElementById('research-placeholder');
+  const rContent     = document.getElementById('research-content');
+  rPlaceholder.style.display = 'none';
+
+  const fin = d.financial_snapshot || {};
+  const ass = d.associations || {};
+
+  const metricItems = [
+    { l: '売上規模',   v: fin.revenue },
+    { l: '時価総額',   v: fin.market_cap },
+    { l: 'PER',        v: fin.per },
+    { l: 'ROE',        v: fin.roe },
+    { l: '配当利回り', v: fin.dividend_yield },
+    { l: '1株配当',    v: fin.dividend_per_share },
+  ].filter(m => m.v);
+
+  const peers = (ass.peers || []).map(p =>
+    `<span class="r-peer-chip" onclick="searchPeer('${esc(p.ticker)}','${esc(p.name)}')" title="${esc(p.ticker)}">${esc(p.name)}</span>`
+  ).join('');
+
+  const themes = (ass.themes || []).map(t =>
+    `<span class="r-theme">${esc(t)}</span>`
+  ).join('');
+
+  const questions = (ass.questions || []).map(q =>
+    `<div class="r-question">${esc(q)}</div>`
+  ).join('');
+
+  rContent.innerHTML = `
+    <div class="r-company">
+      <div class="r-company-name">${esc(d.company_name)}</div>
+      <div class="r-company-en">${esc(d.company_name_en || '')}</div>
+      <div class="r-tags">
+        <span class="r-tag accent">${esc(d.ticker || '')}</span>
+        <span class="r-tag">${esc(d.market || '')}</span>
+        <span class="r-tag">${esc(d.sector || '')}</span>
+        <span class="r-tag">${esc(d.country || '')}</span>
+      </div>
+      ${d.yahoo_url ? `<a class="r-link-btn" href="${esc(d.yahoo_url)}" target="_blank" rel="noopener">📊 Yahoo Finance で確認</a>` : ''}
+    </div>
+
+    <div class="r-section">
+      <div class="r-sec-label">事業概要</div>
+      <div class="r-overview">${esc(d.overview || '')}</div>
+    </div>
+
+    ${d.business_segments?.length ? `
+    <div class="r-section">
+      <div class="r-sec-label">主要事業</div>
+      <div class="r-segments">${d.business_segments.map(s => `<span class="r-seg">${esc(s)}</span>`).join('')}</div>
+    </div>` : ''}
+
+    ${metricItems.length ? `
+    <div class="r-section">
+      <div class="r-sec-label">財務スナップショット（概算）</div>
+      <div class="r-metrics-grid">${metricItems.map(m => `
+        <div class="r-metric">
+          <div class="r-metric-label">${esc(m.l)}</div>
+          <div class="r-metric-value">${esc(m.v)}</div>
+        </div>`).join('')}
+      </div>
+    </div>` : ''}
+
+    ${d.investment_points?.length ? `
+    <div class="r-section">
+      <div class="r-sec-label">投資検討ポイント</div>
+      <ul class="r-list">${d.investment_points.map(p => `<li>${esc(p)}</li>`).join('')}</ul>
+    </div>` : ''}
+
+    ${d.risks?.length ? `
+    <div class="r-section">
+      <div class="r-sec-label">リスク</div>
+      <ul class="r-list">${d.risks.map(r => `<li>${esc(r)}</li>`).join('')}</ul>
+    </div>` : ''}
+
+    <div class="r-section">
+      <div class="r-sec-label">連想メモ</div>
+
+      ${peers ? `<div class="r-assoc-block">
+        <div class="r-assoc-title">類似・競合企業（クリックで調査）</div>
+        <div class="r-peer-chips">${peers}</div>
+      </div>` : ''}
+
+      ${themes ? `<div class="r-assoc-block">
+        <div class="r-assoc-title">関連投資テーマ</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px">${themes}</div>
+      </div>` : ''}
+
+      ${questions ? `<div class="r-assoc-block">
+        <div class="r-assoc-title">調べるべきこと</div>
+        ${questions}
+      </div>` : ''}
+    </div>
+
+    <div class="r-data-note">⚠ ${esc(d.data_note || 'データはAIの学習データに基づく概算値です。')}</div>
+  `;
+  rContent.style.display = 'block';
+}
+
+function searchPeer(ticker, name) {
+  document.getElementById('search-input').value = ticker || name;
+  doResearch();
+}
+
+// ─────────────────────────────────────────────
+// Memo editor
+// ─────────────────────────────────────────────
+function prefillMemo(d) {
+  if (!d?.ticker) return;
+  const saved = memos[d.ticker];
+  if (saved) {
+    loadMemoToEditor(d.ticker);
+  } else {
+    // pre-fill with AI data for new memo
+    clearEditorFields();
+    if (d.risks?.length) {
+      document.getElementById('m-risks').value = d.risks.join('\n');
+    }
+  }
+}
+
+function setRating(n) {
+  currentRating = n;
+  document.querySelectorAll('.star').forEach((s, i) => {
+    s.classList.toggle('on', i < n);
+  });
+}
+
+function starString(n) {
+  return '★'.repeat(n) + '☆'.repeat(5 - n);
+}
+
+// Tag handling
+function focusTagInput() { document.getElementById('tag-input').focus(); }
+function handleTagKey(e) {
+  const input = e.target;
+  if (e.key === 'Enter' || e.key === ',') {
+    e.preventDefault();
+    const val = input.value.trim().replace(/,$/, '');
+    if (val && !currentTags.includes(val)) {
+      currentTags.push(val);
+      renderTags();
+    }
+    input.value = '';
+  } else if (e.key === 'Backspace' && !input.value && currentTags.length) {
+    currentTags.pop();
+    renderTags();
+  }
+}
+function removeTag(tag) {
+  currentTags = currentTags.filter(t => t !== tag);
+  renderTags();
+}
+function renderTags() {
+  const wrap  = document.getElementById('tag-wrap');
+  const input = document.getElementById('tag-input');
+  // Remove old tag elements (keep input)
+  wrap.querySelectorAll('.tag-item').forEach(el => el.remove());
+  currentTags.forEach(tag => {
+    const el = document.createElement('span');
+    el.className = 'tag-item';
+    el.innerHTML = `${esc(tag)}<span class="tag-rm" onclick="removeTag('${esc(tag)}')">×</span>`;
+    wrap.insertBefore(el, input);
+  });
+}
+
+function clearEditorFields() {
+  setRating(0);
+  currentTags = [];
+  renderTags();
+  document.getElementById('m-price').value = '';
+  document.getElementById('m-thesis').value = '';
+  document.getElementById('m-risks').value = '';
+  document.getElementById('m-notes').value = '';
+}
+
+function clearEditor() {
+  clearEditorFields();
+  document.getElementById('save-msg').classList.remove('show');
+  document.getElementById('notion-msg').innerHTML = '';
+}
+
+function saveMemo() {
+  if (!currentData?.ticker) { alert('先に銘柄をリサーチしてください'); return; }
+  const ticker = currentData.ticker;
+
+  memos[ticker] = {
+    ticker,
+    companyName:    currentData.company_name    || ticker,
+    companyNameEn:  currentData.company_name_en || '',
+    sector:         currentData.sector          || '',
+    rating:         currentRating,
+    targetPrice:    parseFloat(document.getElementById('m-price').value) || null,
+    tags:           [...currentTags],
+    thesis:         document.getElementById('m-thesis').value,
+    risks:          document.getElementById('m-risks').value,
+    notes:          document.getElementById('m-notes').value,
+    aiOverview:     currentData.overview        || '',
+    aiPoints:       currentData.investment_points || [],
+    savedAt:        new Date().toISOString(),
+    notionPageId:   memos[ticker]?.notionPageId || null,
+  };
+
+  localStorage.setItem(KEY_MEMOS, JSON.stringify(memos));
+  const msg = document.getElementById('save-msg');
+  msg.classList.add('show');
+  setTimeout(() => msg.classList.remove('show'), 2000);
+  renderSavedList();
+}
+
+function loadMemoToEditor(ticker) {
+  const m = memos[ticker];
+  if (!m) return;
+  setRating(m.rating || 0);
+  currentTags = [...(m.tags || [])];
+  renderTags();
+  document.getElementById('m-price').value  = m.targetPrice != null ? m.targetPrice : '';
+  document.getElementById('m-thesis').value = m.thesis || '';
+  document.getElementById('m-risks').value  = m.risks  || '';
+  document.getElementById('m-notes').value  = m.notes  || '';
+}
+
+function deleteMemo(ticker, e) {
+  e.stopPropagation();
+  if (!confirm(`${ticker} のメモを削除しますか？`)) return;
+  delete memos[ticker];
+  localStorage.setItem(KEY_MEMOS, JSON.stringify(memos));
+  renderSavedList();
+}
+
+function renderSavedList() {
+  const list = document.getElementById('saved-list');
+  const keys = Object.keys(memos);
+  if (!keys.length) {
+    list.innerHTML = '<div class="saved-empty">まだメモがありません。銘柄を検索してメモを書いてみましょう。</div>';
+    return;
+  }
+  // sort by savedAt desc
+  keys.sort((a, b) => (memos[b].savedAt || '') > (memos[a].savedAt || '') ? 1 : -1);
+  list.innerHTML = `<div class="saved-grid">${keys.map(t => {
+    const m = memos[t];
+    const snippet = m.thesis || m.notes || '';
+    return `<div class="memo-card" onclick="openSavedMemo('${esc(t)}')">
+      <div class="mc-ticker">${esc(m.ticker)}</div>
+      <div class="mc-name">${esc(m.companyName)}</div>
+      <div class="mc-stars">${starString(m.rating || 0)}</div>
+      ${snippet ? `<div class="mc-snippet">${esc(snippet)}</div>` : ''}
+      ${m.tags?.length ? `<div class="mc-tags">${m.tags.map(tg => `<span class="mc-tag">${esc(tg)}</span>`).join('')}</div>` : ''}
+      <div class="mc-date">${m.savedAt ? m.savedAt.slice(0,10) : ''}</div>
+      ${m.notionPageId ? '<div class="mc-notion-dot" title="Notion同期済み"></div>' : ''}
+      <button class="mc-del" onclick="deleteMemo('${esc(t)}',event)">×</button>
+    </div>`;
+  }).join('')}</div>`;
+}
+
+function openSavedMemo(ticker) {
+  const m = memos[ticker];
+  if (!m) return;
+  document.getElementById('main-area').style.display = 'grid';
+  loadMemoToEditor(ticker);
+
+  // show cached AI data if available, else trigger research
+  const rContent     = document.getElementById('research-content');
+  const rPlaceholder = document.getElementById('research-placeholder');
+
+  if (m.aiOverview) {
+    // Reconstruct minimal display
+    rPlaceholder.style.display = 'none';
+    rContent.innerHTML = `
+      <div class="r-company">
+        <div class="r-company-name">${esc(m.companyName)}</div>
+        <div class="r-company-en">${esc(m.companyNameEn || '')}</div>
+        <div class="r-tags">
+          <span class="r-tag accent">${esc(m.ticker)}</span>
+          <span class="r-tag">${esc(m.sector || '')}</span>
+        </div>
+      </div>
+      <div class="r-section">
+        <div class="r-sec-label">事業概要（保存時のAIデータ）</div>
+        <div class="r-overview">${esc(m.aiOverview)}</div>
+      </div>
+      ${m.aiPoints?.length ? `
+      <div class="r-section">
+        <div class="r-sec-label">投資検討ポイント</div>
+        <ul class="r-list">${m.aiPoints.map(p => `<li>${esc(p)}</li>`).join('')}</ul>
+      </div>` : ''}
+      <div style="margin-top:12px">
+        <button class="hdr-btn" onclick="reResearch('${esc(m.ticker)}')">🔄 最新情報でリサーチし直す</button>
+      </div>`;
+    rContent.style.display = 'block';
+    // update currentData minimally so saveMemo works
+    currentData = { ticker: m.ticker, company_name: m.companyName, company_name_en: m.companyNameEn, sector: m.sector, overview: m.aiOverview, investment_points: m.aiPoints || [] };
+  } else {
+    reResearch(ticker);
+  }
+}
+
+function reResearch(ticker) {
+  document.getElementById('search-input').value = ticker;
+  doResearch();
+}
+
+// ─────────────────────────────────────────────
+// Notion API
+// ─────────────────────────────────────────────
+async function notionRequest(url, method, body) {
+  const token = localStorage.getItem(KEY_NTOKEN);
+  const opts  = {
+    method,
+    headers: {
+      'Authorization': `Bearer ${token}`,
+      'Content-Type':  'application/json',
+      'Notion-Version': '2022-06-28',
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  };
+
+  // Try direct first (may fail with CORS), then proxy
+  try {
+    const r = await fetch(url, opts);
+    if (r.ok) return r.json();
+    if (r.status !== 0) {
+      const err = await r.json().catch(() => ({}));
+      throw new Error(err.message || `HTTP ${r.status}`);
+    }
+  } catch (e) {
+    if (!e.message.startsWith('HTTP') && !e.message.includes('Notion')) {
+      const proxy = 'https://corsproxy.io/?' + encodeURIComponent(url);
+      const r2    = await fetch(proxy, opts);
+      if (!r2.ok) {
+        const err2 = await r2.json().catch(() => ({}));
+        throw new Error(err2.message || `HTTP ${r2.status}`);
+      }
+      return r2.json();
+    }
+    throw e;
+  }
+  throw new Error('Notion request failed');
+}
+
+function richText(content) {
+  return [{ type: 'text', text: { content: content || '' } }];
+}
+function heading(level, text) {
+  const type = `heading_${level}`;
+  return { object: 'block', type, [type]: { rich_text: richText(text) } };
+}
+function para(text) {
+  return { object: 'block', type: 'paragraph', paragraph: { rich_text: richText(text) } };
+}
+function bullet(text) {
+  return { object: 'block', type: 'bulleted_list_item', bulleted_list_item: { rich_text: richText(text) } };
+}
+function divider() {
+  return { object: 'block', type: 'divider', divider: {} };
+}
+
+async function pushToNotion() {
+  const token  = localStorage.getItem(KEY_NTOKEN);
+  const dbId   = localStorage.getItem(KEY_NDBID);
+  const msgEl  = document.getElementById('notion-msg');
+
+  if (!token || !dbId) {
+    msgEl.innerHTML = `<div class="notion-msg err">⚙ 設定からNotionトークンとデータベースIDを入力してください。<br>
+      <div class="notion-setup">Notionインテグレーションの設定方法は設定パネルをご確認ください。</div></div>`;
+    return;
+  }
+  if (!currentData?.ticker) {
+    msgEl.innerHTML = `<div class="notion-msg err">先に銘柄をリサーチしてください</div>`;
+    return;
+  }
+
+  saveMemo();  // 先にローカル保存
+
+  const m      = memos[currentData.ticker];
+  const ticker = m.ticker;
+  const title  = `${m.companyName}（${ticker}）`;
+
+  msgEl.innerHTML = `<div class="notion-msg" style="border-color:var(--border);color:var(--text2)">
+    <span style="display:inline-block;width:12px;height:12px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .7s linear infinite;margin-right:6px;vertical-align:middle"></span>
+    Notionに保存中...</div>`;
+
+  // Build page blocks
+  const blocks = [
+    heading(2, '事業概要'),
+    para(m.aiOverview || ''),
+  ];
+
+  if (m.aiPoints?.length) {
+    blocks.push(heading(2, '投資検討ポイント'));
+    m.aiPoints.forEach(p => blocks.push(bullet(p)));
+  }
+
+  blocks.push(divider());
+  blocks.push(heading(2, '投資テーゼ'));
+  blocks.push(para(m.thesis || '（未入力）'));
+  blocks.push(heading(2, '懸念点・リスク'));
+  blocks.push(para(m.risks || '（未入力）'));
+  blocks.push(heading(2, '自由メモ'));
+  blocks.push(para(m.notes || '（未入力）'));
+
+  if (m.targetPrice != null) {
+    blocks.push(divider());
+    blocks.push(para(`目標株価: ${m.targetPrice}`));
+  }
+
+  const properties = {
+    '名前': { title: richText(title) },
+  };
+  if (ticker) properties['Ticker'] = { rich_text: richText(ticker) };
+  if (m.sector) properties['セクター'] = { select: { name: m.sector } };
+  if (m.rating) properties['評価'] = { select: { name: starString(m.rating) } };
+  if (m.targetPrice != null) properties['目標株価'] = { number: m.targetPrice };
+  if (m.tags?.length) properties['タグ'] = { multi_select: m.tags.map(t => ({ name: t })) };
+  properties['日付'] = { date: { start: new Date().toISOString().slice(0, 10) } };
+
+  try {
+    const pageBody = {
+      parent:     { database_id: dbId.replace(/-/g, '') },
+      properties,
+      children:   blocks,
+    };
+
+    const res = await notionRequest('https://api.notion.com/v1/pages', 'POST', pageBody);
+
+    memos[ticker].notionPageId = res.id;
+    localStorage.setItem(KEY_MEMOS, JSON.stringify(memos));
+    renderSavedList();
+
+    msgEl.innerHTML = `<div class="notion-msg ok">✓ Notionに保存しました！
+      ${res.url ? `<a href="${esc(res.url)}" target="_blank" rel="noopener" style="color:var(--green);margin-left:8px">開く →</a>` : ''}
+    </div>`;
+  } catch (e) {
+    msgEl.innerHTML = `<div class="notion-msg err">✗ Notionエラー: ${esc(e.message)}<br>
+      <small>CORS制限の場合は <a href="#" onclick="copyMarkdown();return false" style="color:var(--accent)">📋 Markdown コピー</a> でNotionに手動で貼り付けられます。</small>
+    </div>`;
+  }
+}
+
+// ─────────────────────────────────────────────
+// Markdown export (fallback)
+// ─────────────────────────────────────────────
+function copyMarkdown() {
+  if (!currentData?.ticker && !Object.keys(memos).length) {
+    alert('コピーするメモがありません'); return;
+  }
+
+  const ticker = currentData?.ticker || '';
+  const m      = memos[ticker] || {};
+  const d      = currentData  || {};
+
+  const md = [
+    `# ${m.companyName || ticker}（${ticker}）`,
+    `**セクター:** ${m.sector || d.sector || ''}  **評価:** ${starString(m.rating || 0)}`,
+    m.targetPrice ? `**目標株価:** ${m.targetPrice}` : '',
+    m.tags?.length ? `**タグ:** ${m.tags.join(', ')}` : '',
+    '',
+    '## 事業概要',
+    m.aiOverview || d.overview || '',
+    '',
+    ...(m.aiPoints?.length ? ['## 投資検討ポイント', ...m.aiPoints.map(p => `- ${p}`), ''] : []),
+    '---',
+    '## 投資テーゼ',
+    m.thesis || '（未入力）',
+    '',
+    '## 懸念点・リスク',
+    m.risks || '（未入力）',
+    '',
+    '## メモ',
+    m.notes || '（未入力）',
+    '',
+    `_保存日: ${m.savedAt?.slice(0,10) || new Date().toISOString().slice(0,10)}_`,
+  ].filter(l => l !== null).join('\n');
+
+  navigator.clipboard.writeText(md).then(() => {
+    const msg = document.getElementById('notion-msg');
+    msg.innerHTML = `<div class="notion-msg ok">✓ Markdownをクリップボードにコピーしました。Notionに貼り付けてください。</div>`;
+  });
+}
+
+// ─────────────────────────────────────────────
+// Util
+// ─────────────────────────────────────────────
+function esc(s) {
+  if (s == null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+init();
+</script>
+</body>
+</html>
