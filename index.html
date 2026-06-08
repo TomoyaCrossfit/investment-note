@@ -110,6 +110,22 @@ body { background:var(--bg); color:var(--text); font-family:-apple-system,BlinkM
 
 .r-data-note { font-size:11px; color:var(--text3); margin-top:16px; font-style:italic; }
 
+/* ── Market comparison table ── */
+.r-comp-table { width:100%; border-collapse:collapse; font-size:12px; margin-top:6px; }
+.r-comp-table th { font-size:10px; font-family:monospace; letter-spacing:0.5px; color:var(--text3); padding:5px 8px; text-align:left; border-bottom:1px solid var(--border); font-weight:600; }
+.r-comp-table td { padding:7px 8px; border-bottom:1px solid var(--border2); color:var(--text2); vertical-align:middle; }
+.r-comp-table tr:last-child td { border-bottom:none; }
+.r-comp-table td:first-child { color:var(--text3); font-family:monospace; font-size:11px; }
+.r-comp-table td.val { color:var(--text); font-weight:600; font-family:monospace; }
+.r-comp-table td.avg { color:var(--text3); font-family:monospace; }
+.r-comp-badge { display:inline-block; font-size:10px; font-family:monospace; font-weight:700; border-radius:4px; padding:2px 7px; letter-spacing:0.3px; }
+.badge-cheap  { background:rgba(63,185,80,.15);  border:1px solid rgba(63,185,80,.4);  color:#3fb950; }
+.badge-exp    { background:rgba(248,81,73,.15);  border:1px solid rgba(248,81,73,.4);  color:#f85149; }
+.badge-fair   { background:rgba(139,148,158,.1); border:1px solid rgba(139,148,158,.3); color:#8b949e; }
+.badge-good   { background:rgba(63,185,80,.15);  border:1px solid rgba(63,185,80,.4);  color:#3fb950; }
+.badge-low    { background:rgba(248,81,73,.15);  border:1px solid rgba(248,81,73,.4);  color:#f85149; }
+.r-comp-note  { font-size:10px; color:var(--text3); margin-top:6px; }
+
 /* ── Yahoo link ── */
 .r-link-btn { display:inline-block; font-size:11px; background:var(--surf2); border:1px solid var(--border); border-radius:6px; padding:4px 12px; color:var(--text2); text-decoration:none; margin-top:8px; }
 .r-link-btn:hover { border-color:var(--accent); color:var(--accent); }
@@ -454,9 +470,18 @@ async function doResearch() {
     "revenue": "売上規模（例: 約45兆円）",
     "market_cap": "時価総額（例: 約35兆円）",
     "per": "PER概算（例: 8.5倍）",
+    "pbr": "PBR概算（例: 1.2倍）",
     "roe": "ROE概算（例: 14%）",
     "dividend_yield": "配当利回り概算（例: 2.8%）",
     "dividend_per_share": "1株配当概算（例: 60円 または $1.20）"
+  },
+  "market_comparison": {
+    "index_name": "日経225（JP）またはS&P500（US）",
+    "per_avg": "市場平均PER（例: 約15倍）",
+    "pbr_avg": "市場平均PBR（例: 約1.3倍）",
+    "roe_avg": "市場平均ROE（例: 約8%）",
+    "div_yield_avg": "市場平均配当利回り（例: 約2%）",
+    "data_note": "データ時点（例: 2024年頃）"
   },
   "investment_points": ["投資ポイント1（具体的に）", "投資ポイント2", "投資ポイント3"],
   "risks": ["リスク1（具体的に）", "リスク2", "リスク3"],
@@ -482,7 +507,7 @@ async function doResearch() {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 1800,
+        max_tokens: 2200,
         messages: [{ role: 'user', content: prompt }],
       }),
     });
@@ -510,6 +535,71 @@ async function doResearch() {
 }
 
 // ─────────────────────────────────────────────
+// Market comparison helpers
+// ─────────────────────────────────────────────
+function parseNumVal(s) {
+  if (!s) return null;
+  const m = String(s).replace(/,/g, '').match(/[\d.]+/);
+  return m ? parseFloat(m[0]) : null;
+}
+
+function compBadge(company, avg, metric) {
+  const c = parseNumVal(company);
+  const a = parseNumVal(avg);
+  if (c == null || a == null || a === 0) return `<span class="r-comp-badge badge-fair">-</span>`;
+  const ratio = c / a;
+  if (metric === 'per' || metric === 'pbr') {
+    if (ratio <= 0.85)      return `<span class="r-comp-badge badge-cheap">割安</span>`;
+    if (ratio >= 1.15)      return `<span class="r-comp-badge badge-exp">割高</span>`;
+    return                         `<span class="r-comp-badge badge-fair">標準</span>`;
+  }
+  if (metric === 'roe') {
+    if (ratio >= 1.15)      return `<span class="r-comp-badge badge-good">優秀</span>`;
+    if (ratio <= 0.85)      return `<span class="r-comp-badge badge-low">低め</span>`;
+    return                         `<span class="r-comp-badge badge-fair">標準</span>`;
+  }
+  if (metric === 'div') {
+    if (ratio >= 1.15)      return `<span class="r-comp-badge badge-good">高い</span>`;
+    if (ratio <= 0.85)      return `<span class="r-comp-badge badge-low">低い</span>`;
+    return                         `<span class="r-comp-badge badge-fair">標準</span>`;
+  }
+  return `<span class="r-comp-badge badge-fair">標準</span>`;
+}
+
+function renderMarketComparison(fin, mc) {
+  if (!mc) return '';
+  const rows = [
+    { label: 'PER',        company: fin.per,            avg: mc.per_avg,      key: 'per' },
+    { label: 'PBR',        company: fin.pbr,            avg: mc.pbr_avg,      key: 'pbr' },
+    { label: 'ROE',        company: fin.roe,            avg: mc.roe_avg,      key: 'roe' },
+    { label: '配当利回り', company: fin.dividend_yield, avg: mc.div_yield_avg, key: 'div' },
+  ].filter(r => r.company || r.avg);
+
+  if (!rows.length) return '';
+
+  const idxLabel = esc(mc.index_name || '市場平均');
+  const trs = rows.map(r => `
+    <tr>
+      <td>${r.label}</td>
+      <td class="val">${esc(r.company || '-')}</td>
+      <td class="avg">${esc(r.avg || '-')}</td>
+      <td>${compBadge(r.company, r.avg, r.key)}</td>
+    </tr>`).join('');
+
+  return `
+    <div class="r-section">
+      <div class="r-sec-label">市場平均との比較（${idxLabel}）</div>
+      <table class="r-comp-table">
+        <thead><tr>
+          <th>指標</th><th>当社</th><th>${idxLabel}平均</th><th>判定</th>
+        </tr></thead>
+        <tbody>${trs}</tbody>
+      </table>
+      ${mc.data_note ? `<div class="r-comp-note">※ ${esc(mc.data_note)}</div>` : ''}
+    </div>`;
+}
+
+// ─────────────────────────────────────────────
 // Render research
 // ─────────────────────────────────────────────
 function renderResearch(d) {
@@ -519,11 +609,13 @@ function renderResearch(d) {
 
   const fin = d.financial_snapshot || {};
   const ass = d.associations || {};
+  const mc  = d.market_comparison || null;
 
   const metricItems = [
     { l: '売上規模',   v: fin.revenue },
     { l: '時価総額',   v: fin.market_cap },
     { l: 'PER',        v: fin.per },
+    { l: 'PBR',        v: fin.pbr },
     { l: 'ROE',        v: fin.roe },
     { l: '配当利回り', v: fin.dividend_yield },
     { l: '1株配当',    v: fin.dividend_per_share },
@@ -575,6 +667,8 @@ function renderResearch(d) {
         </div>`).join('')}
       </div>
     </div>` : ''}
+
+    ${renderMarketComparison(fin, mc)}
 
     ${d.investment_points?.length ? `
     <div class="r-section">
