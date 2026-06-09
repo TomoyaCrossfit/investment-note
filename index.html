@@ -403,6 +403,8 @@ async function fetchPageContent(url, maxChars = 3000) {
   const proxies = [
     `https://corsproxy.io/?${encodeURIComponent(url)}`,
     `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+    `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(url)}`,
+    `https://thingproxy.freeboard.io/fetch/${url}`,
   ];
   for (const proxyUrl of proxies) {
     const controller = new AbortController();
@@ -412,6 +414,7 @@ async function fetchPageContent(url, maxChars = 3000) {
       clearTimeout(timer);
       if (!r.ok) continue;
       const html = await r.text();
+      if (!html || html.length < 100) continue;
       const parser = new DOMParser();
       const doc = parser.parseFromString(html, 'text/html');
       ['script','style','nav','footer','header','aside','noscript','iframe','svg','form'].forEach(tag => {
@@ -421,11 +424,16 @@ async function fetchPageContent(url, maxChars = 3000) {
         .replace(/[ \t]+/g, ' ')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
-      if (text.length > 200) return text.slice(0, maxChars);
+      if (text.length > 50) {
+        console.log(`[InvNote] fetch OK: ${proxyUrl.slice(0, 60)}`);
+        return text.slice(0, maxChars);
+      }
     } catch (e) {
       clearTimeout(timer);
+      console.warn(`[InvNote] fetch failed (${proxyUrl.slice(0, 60)}):`, e.message);
     }
   }
+  console.warn('[InvNote] all proxies failed for:', url);
   return null;
 }
 
@@ -534,24 +542,31 @@ async function doResearch() {
 
     // Brave結果を収集・重複排除
     const urlMap = new Map();
-    searchDatas.forEach(res => {
-      if (res.status !== 'fulfilled' || !res.value) return;
-      (res.value?.web?.results || []).forEach(r => {
-        if (!urlMap.has(r.url)) {
-          urlMap.set(r.url, { ...r, priority: scrapePriority(r.url) });
-        }
+    const addResults = (data) => {
+      (data?.web?.results || []).forEach(r => {
+        if (!urlMap.has(r.url)) urlMap.set(r.url, { ...r, priority: scrapePriority(r.url) });
       });
-    });
+    };
+    searchDatas.forEach(res => { if (res.status === 'fulfilled' && res.value) addResults(res.value); });
+
+    // ティッカー確定後に精密クエリを追加実行
+    if (ticker) {
+      console.log('[InvNote] ticker:', ticker);
+      const precise = await braveSearch(`${query} ${ticker} PER PBR ROE 配当利回り 時価総額 最新`).catch(() => null);
+      if (precise) addResults(precise);
+    }
+
     const allResults = [...urlMap.values()].sort((a, b) => b.priority - a.priority);
 
-    const snippetText = allResults.slice(0, 8).map((r, i) =>
+    const snippetText = allResults.slice(0, 10).map((r, i) =>
       `[${i+1}]${r.priority > 0 ? '★' : ''} ${r.title}\n概要: ${r.description || '（なし）'}\n日付: ${r.age || '不明'}\nURL: ${r.url}`
     ).join('\n\n');
 
     // Step 2: ティッカーから直接URLを組み立て + Braveで見つかった金融URLを追加
     const directUrls  = buildDirectUrls(ticker);
     const braveFinancialUrls = allResults.filter(r => r.priority > 0).map(r => r.url);
-    const urlsToFetch = [...new Set([...directUrls, ...braveFinancialUrls])].slice(0, 3);
+    const urlsToFetch = [...new Set([...directUrls, ...braveFinancialUrls])].slice(0, 4);
+    console.log('[InvNote] URLs to fetch:', urlsToFetch);
 
     if (urlsToFetch.length > 0) {
       const srcNote = ticker ? `（${ticker}）` : '';
