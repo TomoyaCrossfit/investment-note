@@ -449,6 +449,52 @@ function scrapePriority(url) {
   return 0;
 }
 
+// ティッカーからkabutan/minkabu等の直接URLを組み立て
+function buildDirectUrls(ticker) {
+  if (!ticker) return [];
+  const code = ticker.replace(/\.[A-Z]+$/, '');  // "6762.T" → "6762"
+  const isJP = /^\d{4}$/.test(code);
+  const isUS = /^[A-Z]{1,5}$/.test(ticker);
+  if (isJP) {
+    return [
+      `https://kabutan.jp/stock/?code=${code}`,
+      `https://minkabu.jp/stock/${code}/`,
+      `https://irbank.net/${ticker}`,
+    ];
+  }
+  if (isUS) {
+    return [
+      `https://stockanalysis.com/stocks/${ticker.toLowerCase()}/`,
+      `https://stockanalysis.com/stocks/${ticker.toLowerCase()}/financials/`,
+    ];
+  }
+  return [];
+}
+
+// Haiku で高速にティッカーだけ抽出
+async function quickExtractTicker(query, apiKey) {
+  try {
+    const res = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'content-type': 'application/json',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 60,
+        messages: [{ role: 'user', content: `"${query}"の証券コード/ティッカーをJSONのみで返してください。JP株なら{"ticker":"6762"}、US株なら{"ticker":"AAPL"}、不明なら{"ticker":null}` }],
+      }),
+    });
+    if (!res.ok) return null;
+    const j = await res.json();
+    const m = (j.content?.[0]?.text || '').match(/\{[\s\S]*?\}/);
+    return m ? JSON.parse(m[0]).ticker || null : null;
+  } catch { return null; }
+}
+
 // ─────────────────────────────────────────────
 // Research (Claude API)
 // ─────────────────────────────────────────────
@@ -471,19 +517,22 @@ async function doResearch() {
   let fetchedFromWeb = false;
 
   if (hasBrave) {
-    // Step 1: 3クエリを並列でBrave検索
-    rPlaceholder.innerHTML = `<div class="status-box"><div class="spinner"></div>最新情報を複数クエリで並列検索中...</div>`;
+    // Step 1: Brave検索 と Haiku ティッカー抽出 を並列実行
+    rPlaceholder.innerHTML = `<div class="status-box"><div class="spinner"></div>ティッカー特定・最新情報検索を同時実行中...</div>`;
     rPlaceholder.style.display = 'flex';
 
-    const queries = [
-      `${query} 株探 kabutan PER PBR ROE 配当利回り 時価総額`,
-      `${query} minkabu 財務指標 売上高 営業利益 最新`,
+    const braveQueries = [
+      `${query} 株探 PER PBR ROE 配当利回り 時価総額`,
       `${query} 最新決算 業績 売上 2025`,
+      `${query} 株価 財務指標`,
     ];
 
-    const searchDatas = await Promise.allSettled(queries.map(q => braveSearch(q)));
+    const [searchDatas, ticker] = await Promise.all([
+      Promise.allSettled(braveQueries.map(q => braveSearch(q))),
+      quickExtractTicker(query, apiKey),
+    ]);
 
-    // 全結果を収集・重複排除し、スクレイピング優先度でソート
+    // Brave結果を収集・重複排除
     const urlMap = new Map();
     searchDatas.forEach(res => {
       if (res.status !== 'fulfilled' || !res.value) return;
@@ -493,24 +542,26 @@ async function doResearch() {
         }
       });
     });
-
     const allResults = [...urlMap.values()].sort((a, b) => b.priority - a.priority);
 
     const snippetText = allResults.slice(0, 8).map((r, i) =>
       `[${i+1}]${r.priority > 0 ? '★' : ''} ${r.title}\n概要: ${r.description || '（なし）'}\n日付: ${r.age || '不明'}\nURL: ${r.url}`
     ).join('\n\n');
 
-    // Step 2: スクレイピング可能な金融サイトを優先してfetch（最大3件）
-    const financialUrls = allResults.filter(r => r.priority > 0).slice(0, 3).map(r => r.url);
+    // Step 2: ティッカーから直接URLを組み立て + Braveで見つかった金融URLを追加
+    const directUrls  = buildDirectUrls(ticker);
+    const braveFinancialUrls = allResults.filter(r => r.priority > 0).map(r => r.url);
+    const urlsToFetch = [...new Set([...directUrls, ...braveFinancialUrls])].slice(0, 3);
 
-    if (financialUrls.length > 0) {
-      rPlaceholder.innerHTML = `<div class="status-box"><div class="spinner"></div>Yahoo Finance・株探等から最新データを直接取得中（${financialUrls.length}件）...</div>`;
+    if (urlsToFetch.length > 0) {
+      const srcNote = ticker ? `（${ticker}）` : '';
+      rPlaceholder.innerHTML = `<div class="status-box"><div class="spinner"></div>株探・みんかぶ等から最新データを直接取得中${srcNote}...</div>`;
       rPlaceholder.style.display = 'flex';
 
-      const pageResults = await Promise.allSettled(financialUrls.map(u => fetchPageContent(u)));
+      const pageResults = await Promise.allSettled(urlsToFetch.map(u => fetchPageContent(u)));
       const fetchedTexts = pageResults
         .map((r, i) => r.status === 'fulfilled' && r.value
-          ? `=== ${financialUrls[i]} ===\n${r.value}`
+          ? `=== ${urlsToFetch[i]} ===\n${r.value}`
           : null)
         .filter(Boolean);
 
