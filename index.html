@@ -399,40 +399,54 @@ async function braveSearch(q) {
   return null;
 }
 
-async function fetchPageContent(url, maxChars = 2500) {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), 7000);
-  try {
-    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
-    const r = await fetch(proxyUrl, { signal: controller.signal });
-    clearTimeout(timer);
-    if (!r.ok) return null;
-    const html = await r.text();
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
-    ['script','style','nav','footer','header','aside','noscript','iframe','svg','form'].forEach(tag => {
-      doc.querySelectorAll(tag).forEach(el => el.remove());
-    });
-    const text = (doc.body?.textContent || '')
-      .replace(/[ \t]+/g, ' ')
-      .replace(/\n{3,}/g, '\n\n')
-      .trim();
-    return text.slice(0, maxChars) || null;
-  } catch (e) {
-    clearTimeout(timer);
-    return null;
+async function fetchPageContent(url, maxChars = 3000) {
+  const proxies = [
+    `https://corsproxy.io/?${encodeURIComponent(url)}`,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+  ];
+  for (const proxyUrl of proxies) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      const r = await fetch(proxyUrl, { signal: controller.signal });
+      clearTimeout(timer);
+      if (!r.ok) continue;
+      const html = await r.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+      ['script','style','nav','footer','header','aside','noscript','iframe','svg','form'].forEach(tag => {
+        doc.querySelectorAll(tag).forEach(el => el.remove());
+      });
+      const text = (doc.body?.textContent || '')
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+      if (text.length > 200) return text.slice(0, maxChars);
+    } catch (e) {
+      clearTimeout(timer);
+    }
   }
+  return null;
 }
 
+// スクレイピングしやすいSSRサイト（優先）
+const SCRAPABLE_SITES = ['kabutan.jp', 'irbank.net', 'minkabu.jp', 'ullet.com', 'stockanalysis.com'];
+// 金融関連サイト全体
 const FINANCIAL_SITES = [
+  ...SCRAPABLE_SITES,
   'finance.yahoo.co.jp', 'finance.yahoo.com',
-  'kabutan.jp', 'minkabu.jp', 'buffett-code.com',
-  'irbank.net', 'bloomberg.co.jp', 'nikkei.com',
-  'reuters.com', 'ullet.com', 'trader.work', 'stockanalysis.com',
+  'buffett-code.com', 'bloomberg.co.jp', 'nikkei.com',
+  'reuters.com', 'trader.work',
 ];
 
 function isFinancialUrl(url) {
   return FINANCIAL_SITES.some(s => url.includes(s));
+}
+
+function scrapePriority(url) {
+  if (SCRAPABLE_SITES.some(s => url.includes(s))) return 2;
+  if (isFinancialUrl(url)) return 1;
+  return 0;
 }
 
 // ─────────────────────────────────────────────
@@ -462,32 +476,32 @@ async function doResearch() {
     rPlaceholder.style.display = 'flex';
 
     const queries = [
-      `${query} 財務指標 PER ROE 配当利回り 時価総額 売上高 最新`,
-      `${query} 最新決算 業績 ニュース 2025`,
-      `${query} 株価 投資情報`,
+      `${query} 株探 kabutan PER PBR ROE 配当利回り 時価総額`,
+      `${query} minkabu 財務指標 売上高 営業利益 最新`,
+      `${query} 最新決算 業績 売上 2025`,
     ];
 
     const searchDatas = await Promise.allSettled(queries.map(q => braveSearch(q)));
 
-    // 全結果を収集・重複排除し、金融サイトを優先ソート
+    // 全結果を収集・重複排除し、スクレイピング優先度でソート
     const urlMap = new Map();
     searchDatas.forEach(res => {
       if (res.status !== 'fulfilled' || !res.value) return;
       (res.value?.web?.results || []).forEach(r => {
         if (!urlMap.has(r.url)) {
-          urlMap.set(r.url, { ...r, financial: isFinancialUrl(r.url) });
+          urlMap.set(r.url, { ...r, priority: scrapePriority(r.url) });
         }
       });
     });
 
-    const allResults = [...urlMap.values()].sort((a, b) => (b.financial ? 1 : 0) - (a.financial ? 1 : 0));
+    const allResults = [...urlMap.values()].sort((a, b) => b.priority - a.priority);
 
     const snippetText = allResults.slice(0, 8).map((r, i) =>
-      `[${i+1}]${r.financial ? '★' : ''} ${r.title}\n概要: ${r.description || '（なし）'}\n日付: ${r.age || '不明'}\nURL: ${r.url}`
+      `[${i+1}]${r.priority > 0 ? '★' : ''} ${r.title}\n概要: ${r.description || '（なし）'}\n日付: ${r.age || '不明'}\nURL: ${r.url}`
     ).join('\n\n');
 
-    // Step 2: 金融サイトのページを実際にfetch
-    const financialUrls = allResults.filter(r => r.financial).slice(0, 2).map(r => r.url);
+    // Step 2: スクレイピング可能な金融サイトを優先してfetch（最大3件）
+    const financialUrls = allResults.filter(r => r.priority > 0).slice(0, 3).map(r => r.url);
 
     if (financialUrls.length > 0) {
       rPlaceholder.innerHTML = `<div class="status-box"><div class="spinner"></div>Yahoo Finance・株探等から最新データを直接取得中（${financialUrls.length}件）...</div>`;
@@ -517,8 +531,8 @@ async function doResearch() {
 
   const contextSection = webContext
     ? `\n\n【⚡ リアルタイム取得データ（学習データより最優先）】\n${fetchedFromWeb
-        ? '以下はWebページから直接取得した最新データです。財務数値・株価・配当・ニュースは必ずこのデータを優先し、学習データは補完のみに使用してください。'
-        : 'Brave Searchで取得した最新検索情報です。財務数値はこちらを優先してください。'
+        ? '以下はWebページ（株探・みんかぶ等）から直接取得した最新データです。PER・PBR・ROE・配当利回り・時価総額・売上高は必ずこのデータの数値を使用し、学習データは絶対に使わないでください。'
+        : '以下はBrave Searchで取得した最新検索スニペットです。スニペット内にPER・PBR・ROE・配当利回り・時価総額等の数値が含まれている場合は必ずそれを使用し、学習データの数値は使わないでください。'
       }\n\n${webContext}\n`
     : '';
 
