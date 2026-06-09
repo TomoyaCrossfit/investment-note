@@ -377,23 +377,19 @@ function saveSettings() {
 }
 
 // ─────────────────────────────────────────────
-// Brave Search
+// Brave Search + Web page fetch
 // ─────────────────────────────────────────────
-async function searchBrave(query) {
+async function braveSearch(q) {
   const braveKey = localStorage.getItem(KEY_BRAVE);
   if (!braveKey) return null;
-
-  const q   = encodeURIComponent(`${query} 株式 決算 業績 ニュース`);
-  const url = `https://api.search.brave.com/res/v1/web/search?q=${q}&count=6&search_lang=ja&country=JP`;
+  const url = `https://api.search.brave.com/res/v1/web/search?q=${encodeURIComponent(q)}&count=5&search_lang=ja&country=JP`;
   const headers = { 'X-Subscription-Token': braveKey, 'Accept': 'application/json' };
-
   try {
     const r = await fetch(url, { headers });
     if (r.ok) return r.json();
     if (r.status !== 0) throw new Error(`HTTP ${r.status}`);
   } catch (e) {
     if (!e.message.startsWith('HTTP')) {
-      // CORS → proxy
       const r2 = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`, { headers });
       if (!r2.ok) throw new Error(`Brave HTTP ${r2.status}`);
       return r2.json();
@@ -403,12 +399,40 @@ async function searchBrave(query) {
   return null;
 }
 
-function formatSearchResults(data) {
-  const results = data?.web?.results || [];
-  if (!results.length) return '';
-  return results.slice(0, 6).map((r, i) =>
-    `[${i + 1}] ${r.title}\n概要: ${r.description || '（なし）'}\n日付: ${r.age || '不明'}\nURL: ${r.url}`
-  ).join('\n\n');
+async function fetchPageContent(url, maxChars = 2500) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 7000);
+  try {
+    const proxyUrl = `https://corsproxy.io/?${encodeURIComponent(url)}`;
+    const r = await fetch(proxyUrl, { signal: controller.signal });
+    clearTimeout(timer);
+    if (!r.ok) return null;
+    const html = await r.text();
+    const parser = new DOMParser();
+    const doc = parser.parseFromString(html, 'text/html');
+    ['script','style','nav','footer','header','aside','noscript','iframe','svg','form'].forEach(tag => {
+      doc.querySelectorAll(tag).forEach(el => el.remove());
+    });
+    const text = (doc.body?.textContent || '')
+      .replace(/[ \t]+/g, ' ')
+      .replace(/\n{3,}/g, '\n\n')
+      .trim();
+    return text.slice(0, maxChars) || null;
+  } catch (e) {
+    clearTimeout(timer);
+    return null;
+  }
+}
+
+const FINANCIAL_SITES = [
+  'finance.yahoo.co.jp', 'finance.yahoo.com',
+  'kabutan.jp', 'minkabu.jp', 'buffett-code.com',
+  'irbank.net', 'bloomberg.co.jp', 'nikkei.com',
+  'reuters.com', 'ullet.com', 'trader.work', 'stockanalysis.com',
+];
+
+function isFinancialUrl(url) {
+  return FINANCIAL_SITES.some(s => url.includes(s));
 }
 
 // ─────────────────────────────────────────────
@@ -428,29 +452,83 @@ async function doResearch() {
   rContent.style.display = 'none';
   btn.disabled = true;
 
-  // Step 1: Brave Search（キーがあれば）
-  let searchContext = '';
-  const hasBrave = !!localStorage.getItem(KEY_BRAVE);
+  const hasBrave     = !!localStorage.getItem(KEY_BRAVE);
+  let webContext     = '';
+  let fetchedFromWeb = false;
+
   if (hasBrave) {
-    rPlaceholder.innerHTML = `<div class="status-box"><div class="spinner"></div>Brave Search で最新情報を検索中...</div>`;
+    // Step 1: 3クエリを並列でBrave検索
+    rPlaceholder.innerHTML = `<div class="status-box"><div class="spinner"></div>最新情報を複数クエリで並列検索中...</div>`;
     rPlaceholder.style.display = 'flex';
-    try {
-      const braveData = await searchBrave(query);
-      searchContext = formatSearchResults(braveData);
-    } catch (e) {
-      console.warn('Brave Search failed:', e.message);
+
+    const queries = [
+      `${query} 財務指標 PER ROE 配当利回り 時価総額 売上高 最新`,
+      `${query} 最新決算 業績 ニュース 2025`,
+      `${query} 株価 投資情報`,
+    ];
+
+    const searchDatas = await Promise.allSettled(queries.map(q => braveSearch(q)));
+
+    // 全結果を収集・重複排除し、金融サイトを優先ソート
+    const urlMap = new Map();
+    searchDatas.forEach(res => {
+      if (res.status !== 'fulfilled' || !res.value) return;
+      (res.value?.web?.results || []).forEach(r => {
+        if (!urlMap.has(r.url)) {
+          urlMap.set(r.url, { ...r, financial: isFinancialUrl(r.url) });
+        }
+      });
+    });
+
+    const allResults = [...urlMap.values()].sort((a, b) => (b.financial ? 1 : 0) - (a.financial ? 1 : 0));
+
+    const snippetText = allResults.slice(0, 8).map((r, i) =>
+      `[${i+1}]${r.financial ? '★' : ''} ${r.title}\n概要: ${r.description || '（なし）'}\n日付: ${r.age || '不明'}\nURL: ${r.url}`
+    ).join('\n\n');
+
+    // Step 2: 金融サイトのページを実際にfetch
+    const financialUrls = allResults.filter(r => r.financial).slice(0, 2).map(r => r.url);
+
+    if (financialUrls.length > 0) {
+      rPlaceholder.innerHTML = `<div class="status-box"><div class="spinner"></div>Yahoo Finance・株探等から最新データを直接取得中（${financialUrls.length}件）...</div>`;
+      rPlaceholder.style.display = 'flex';
+
+      const pageResults = await Promise.allSettled(financialUrls.map(u => fetchPageContent(u)));
+      const fetchedTexts = pageResults
+        .map((r, i) => r.status === 'fulfilled' && r.value
+          ? `=== ${financialUrls[i]} ===\n${r.value}`
+          : null)
+        .filter(Boolean);
+
+      if (fetchedTexts.length) {
+        fetchedFromWeb = true;
+        webContext += `【リアルタイム取得ページ】\n${fetchedTexts.join('\n\n')}\n\n`;
+      }
+    }
+
+    if (snippetText) {
+      webContext += `【検索スニペット】\n${snippetText}`;
     }
   }
 
-  // Step 2: Claude
-  rPlaceholder.innerHTML = `<div class="status-box"><div class="spinner"></div>Claude AI が分析中${hasBrave ? '（最新情報を参照）' : ''}...</div>`;
+  // Step 3: Claude
+  rPlaceholder.innerHTML = `<div class="status-box"><div class="spinner"></div>Claude AI が分析中${fetchedFromWeb ? '（リアルタイムデータ参照）' : hasBrave ? '（検索情報あり）' : ''}...</div>`;
   rPlaceholder.style.display = 'flex';
 
-  const searchSection = searchContext
-    ? `\n\n【最新検索情報（Brave Search APIより取得）】\n以下の情報を踏まえて分析してください。財務数値は検索結果の最新値を優先してください：\n\n${searchContext}\n`
+  const contextSection = webContext
+    ? `\n\n【⚡ リアルタイム取得データ（学習データより最優先）】\n${fetchedFromWeb
+        ? '以下はWebページから直接取得した最新データです。財務数値・株価・配当・ニュースは必ずこのデータを優先し、学習データは補完のみに使用してください。'
+        : 'Brave Searchで取得した最新検索情報です。財務数値はこちらを優先してください。'
+      }\n\n${webContext}\n`
     : '';
 
-  const prompt = `"${query}"についてリサーチしてください。投資メモ用に以下のJSON形式のみで返答してください（説明文不要）。${searchSection}
+  const dataNoteHint = fetchedFromWeb
+    ? 'リアルタイムデータ参照済み（Yahoo Finance・株探等より取得）。取得した数値は高い信頼度。投資判断には必ず公式情報を確認のこと。'
+    : hasBrave
+      ? '検索スニペットを参考にしたAI分析。実際の投資判断には公式情報を参照のこと。'
+      : 'AIの学習データに基づく概算値。実際の投資判断には公式情報を参照のこと。';
+
+  const prompt = `"${query}"についてリサーチしてください。投資メモ用に以下のJSON形式のみで返答してください（説明文不要）。${contextSection}
 
 【重要】ティッカーシンボルは必ずその企業固有の正確なものを返してください。例えばホンダ(本田技研工業)は7267.T、トヨタは7203.T、ソニーは6758.T です。企業名とティッカーが一致しない回答は絶対に避けてください。
 
@@ -467,21 +545,21 @@ async function doResearch() {
   "overview": "事業概要（200字以内・日本語）",
   "business_segments": ["主要事業1", "主要事業2", "主要事業3"],
   "financial_snapshot": {
-    "revenue": "売上規模（例: 約45兆円）",
-    "market_cap": "時価総額（例: 約35兆円）",
-    "per": "PER概算（例: 8.5倍）",
-    "pbr": "PBR概算（例: 1.2倍）",
-    "roe": "ROE概算（例: 14%）",
-    "dividend_yield": "配当利回り概算（例: 2.8%）",
-    "dividend_per_share": "1株配当概算（例: 60円 または $1.20）"
+    "revenue": "売上規模",
+    "market_cap": "時価総額",
+    "per": "PER",
+    "pbr": "PBR",
+    "roe": "ROE",
+    "dividend_yield": "配当利回り",
+    "dividend_per_share": "1株配当（例: 60円 または $1.20）"
   },
   "market_comparison": {
     "index_name": "日経225（JP）またはS&P500（US）",
-    "per_avg": "市場平均PER（例: 約15倍）",
-    "pbr_avg": "市場平均PBR（例: 約1.3倍）",
-    "roe_avg": "市場平均ROE（例: 約8%）",
-    "div_yield_avg": "市場平均配当利回り（例: 約2%）",
-    "data_note": "データ時点（例: 2024年頃）"
+    "per_avg": "市場平均PER",
+    "pbr_avg": "市場平均PBR",
+    "roe_avg": "市場平均ROE",
+    "div_yield_avg": "市場平均配当利回り",
+    "data_note": "データ時点"
   },
   "investment_points": ["投資ポイント1（具体的に）", "投資ポイント2", "投資ポイント3"],
   "risks": ["リスク1（具体的に）", "リスク2", "リスク3"],
@@ -491,7 +569,7 @@ async function doResearch() {
     "questions": ["投資前に調べるべき質問1", "質問2", "質問3"]
   },
   "yahoo_url": "https://finance.yahoo.co.jp/quote/（そのティッカー）（JP株のみ。ホンダなら https://finance.yahoo.co.jp/quote/7267.T）",
-  "data_note": "データは学習データに基づく概算。実際の投資判断には公式情報を参照のこと。"
+  "data_note": "${dataNoteHint}"
 }
 
 見つからない場合: { "found": false, "message": "理由（日本語）" }`;
@@ -507,7 +585,7 @@ async function doResearch() {
       },
       body: JSON.stringify({
         model: 'claude-sonnet-4-6',
-        max_tokens: 2200,
+        max_tokens: 2400,
         messages: [{ role: 'user', content: prompt }],
       }),
     });
@@ -659,7 +737,7 @@ function renderResearch(d) {
 
     ${metricItems.length ? `
     <div class="r-section">
-      <div class="r-sec-label">財務スナップショット（概算）</div>
+      <div class="r-sec-label">財務スナップショット${(d.data_note || '').includes('リアルタイム') ? '（リアルタイム取得）' : '（概算）'}</div>
       <div class="r-metrics-grid">${metricItems.map(m => `
         <div class="r-metric">
           <div class="r-metric-label">${esc(m.l)}</div>
@@ -701,7 +779,7 @@ function renderResearch(d) {
       </div>` : ''}
     </div>
 
-    <div class="r-data-note">⚠ ${esc(d.data_note || 'データはAIの学習データに基づく概算値です。')}</div>
+    <div class="r-data-note" style="${(d.data_note || '').includes('リアルタイム') ? 'color:var(--green)' : ''}">${(d.data_note || '').includes('リアルタイム') ? '⚡' : '⚠'} ${esc(d.data_note || 'データはAIの学習データに基づく概算値です。')}</div>
   `;
   rContent.style.display = 'block';
 }
