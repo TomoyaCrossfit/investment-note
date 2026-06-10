@@ -399,42 +399,37 @@ async function braveSearch(q) {
   return null;
 }
 
-async function fetchPageContent(url, maxChars = 3000) {
-  const proxies = [
-    `https://corsproxy.io/?${encodeURIComponent(url)}`,
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
-    `https://api.codetabs.com/v1/proxy/?quest=${encodeURIComponent(url)}`,
-    `https://thingproxy.freeboard.io/fetch/${url}`,
+// Braveスニペットから財務数値をregexで抽出
+function parseFinancialFromText(text) {
+  const d = {};
+  if (!text) return d;
+  let m;
+  m = text.match(/PER[^0-9\n]{0,15}(\d+\.?\d*)/i);
+  if (m && +m[1] > 0 && +m[1] < 5000) d.per = m[1] + '倍';
+  m = text.match(/PBR[^0-9\n]{0,15}(\d+\.?\d*)/i);
+  if (m && +m[1] > 0 && +m[1] < 500)  d.pbr = m[1] + '倍';
+  m = text.match(/ROE[^0-9\n]{0,15}(\d+\.?\d*)/i);
+  if (m && +m[1] > 0 && +m[1] < 200)  d.roe = m[1] + '%';
+  m = text.match(/配当利回り[^0-9\n]{0,5}(\d+\.?\d*)/);
+  if (m && +m[1] > 0 && +m[1] < 50)   d.dividendYield = m[1] + '%';
+  m = text.match(/1株(?:当たり)?配当[^0-9\n]{0,5}(\d+\.?\d*)/);
+  if (m) d.dps = m[1] + '円';
+  m = text.match(/時価総額[^0-9\n]{0,5}([0-9,]+\.?[0-9]*)(兆|億|百万)?/);
+  if (m) d.marketCap = m[1].replace(/,/g, '') + (m[2] || '') + '円';
+  m = text.match(/売上高[^0-9\n]{0,5}([0-9,]+\.?[0-9]*)(兆|億|百万)?/);
+  if (m) d.revenue = m[1].replace(/,/g, '') + (m[2] || '') + '円';
+  m = text.match(/株価[^0-9\n]{0,5}([0-9,]+(?:\.\d+)?)円/);
+  if (m) d.stockPrice = m[1].replace(/,/g, '') + '円';
+  return d;
+}
+
+function formatExtractedFinancial(d) {
+  const map = [
+    ['stockPrice', '現在株価'], ['marketCap', '時価総額'], ['revenue', '売上高'],
+    ['per', 'PER'], ['pbr', 'PBR'], ['roe', 'ROE'],
+    ['dividendYield', '配当利回り'], ['dps', '1株配当'],
   ];
-  for (const proxyUrl of proxies) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 8000);
-    try {
-      const r = await fetch(proxyUrl, { signal: controller.signal });
-      clearTimeout(timer);
-      if (!r.ok) continue;
-      const html = await r.text();
-      if (!html || html.length < 100) continue;
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, 'text/html');
-      ['script','style','nav','footer','header','aside','noscript','iframe','svg','form'].forEach(tag => {
-        doc.querySelectorAll(tag).forEach(el => el.remove());
-      });
-      const text = (doc.body?.textContent || '')
-        .replace(/[ \t]+/g, ' ')
-        .replace(/\n{3,}/g, '\n\n')
-        .trim();
-      if (text.length > 50) {
-        console.log(`[InvNote] fetch OK: ${proxyUrl.slice(0, 60)}`);
-        return text.slice(0, maxChars);
-      }
-    } catch (e) {
-      clearTimeout(timer);
-      console.warn(`[InvNote] fetch failed (${proxyUrl.slice(0, 60)}):`, e.message);
-    }
-  }
-  console.warn('[InvNote] all proxies failed for:', url);
-  return null;
+  return map.filter(([k]) => d[k]).map(([k, l]) => `${l}: ${d[k]}`).join('\n');
 }
 
 // スクレイピングしやすいSSRサイト（優先）
@@ -457,27 +452,6 @@ function scrapePriority(url) {
   return 0;
 }
 
-// ティッカーからkabutan/minkabu等の直接URLを組み立て
-function buildDirectUrls(ticker) {
-  if (!ticker) return [];
-  const code = ticker.replace(/\.[A-Z]+$/, '');  // "6762.T" → "6762"
-  const isJP = /^\d{4}$/.test(code);
-  const isUS = /^[A-Z]{1,5}$/.test(ticker);
-  if (isJP) {
-    return [
-      `https://kabutan.jp/stock/?code=${code}`,
-      `https://minkabu.jp/stock/${code}/`,
-      `https://irbank.net/${ticker}`,
-    ];
-  }
-  if (isUS) {
-    return [
-      `https://stockanalysis.com/stocks/${ticker.toLowerCase()}/`,
-      `https://stockanalysis.com/stocks/${ticker.toLowerCase()}/financials/`,
-    ];
-  }
-  return [];
-}
 
 // Haiku で高速にティッカーだけ抽出
 async function quickExtractTicker(query, apiKey) {
@@ -525,14 +499,14 @@ async function doResearch() {
   let fetchedFromWeb = false;
 
   if (hasBrave) {
-    // Step 1: Brave検索 と Haiku ティッカー抽出 を並列実行
-    rPlaceholder.innerHTML = `<div class="status-box"><div class="spinner"></div>ティッカー特定・最新情報検索を同時実行中...</div>`;
+    // Step 1: Brave検索（財務指標・決算・配当）とHaikuティッカー抽出を並列実行
+    rPlaceholder.innerHTML = `<div class="status-box"><div class="spinner"></div>最新の財務データを検索中...</div>`;
     rPlaceholder.style.display = 'flex';
 
     const braveQueries = [
-      `${query} 株探 PER PBR ROE 配当利回り 時価総額`,
-      `${query} 最新決算 業績 売上 2025`,
-      `${query} 株価 財務指標`,
+      `${query} 株価 PER PBR ROE 配当利回り 時価総額`,
+      `${query} 決算 売上高 営業利益 純利益 2025`,
+      `${query} 配当 1株配当 利益`,
     ];
 
     const [searchDatas, ticker] = await Promise.all([
@@ -540,7 +514,7 @@ async function doResearch() {
       quickExtractTicker(query, apiKey),
     ]);
 
-    // Brave結果を収集・重複排除
+    // 全結果を収集
     const urlMap = new Map();
     const addResults = (data) => {
       (data?.web?.results || []).forEach(r => {
@@ -549,46 +523,33 @@ async function doResearch() {
     };
     searchDatas.forEach(res => { if (res.status === 'fulfilled' && res.value) addResults(res.value); });
 
-    // ティッカー確定後に精密クエリを追加実行
+    // Step 2: ティッカー確定後に精密クエリを追加
     if (ticker) {
-      console.log('[InvNote] ticker:', ticker);
-      const precise = await braveSearch(`${query} ${ticker} PER PBR ROE 配当利回り 時価総額 最新`).catch(() => null);
+      const precise = await braveSearch(`${ticker} ${query} 株価 時価総額 PER PBR ROE 配当利回り 1株配当`).catch(() => null);
       if (precise) addResults(precise);
     }
 
     const allResults = [...urlMap.values()].sort((a, b) => b.priority - a.priority);
 
+    // Step 3: 全スニペットから財務数値をregexで抽出（金融サイト優先）
+    const merged = {};
+    allResults.forEach(r => {
+      const text = `${r.title} ${r.description || ''}`;
+      const extracted = parseFinancialFromText(text);
+      Object.keys(extracted).forEach(k => { if (!merged[k]) merged[k] = extracted[k]; });
+    });
+
+    const extractedText = formatExtractedFinancial(merged);
+    if (extractedText) {
+      fetchedFromWeb = true;
+      webContext += `【Brave Searchスニペットから抽出した最新財務データ】\n以下の数値はBrave Searchが返した最新Webデータから自動抽出しました。必ずこの数値をそのまま使用してください（推測・概算禁止）：\n${extractedText}\n\n`;
+    }
+
+    // スニペット全文も参考情報として渡す
     const snippetText = allResults.slice(0, 10).map((r, i) =>
       `[${i+1}]${r.priority > 0 ? '★' : ''} ${r.title}\n概要: ${r.description || '（なし）'}\n日付: ${r.age || '不明'}\nURL: ${r.url}`
     ).join('\n\n');
-
-    // Step 2: ティッカーから直接URLを組み立て + Braveで見つかった金融URLを追加
-    const directUrls  = buildDirectUrls(ticker);
-    const braveFinancialUrls = allResults.filter(r => r.priority > 0).map(r => r.url);
-    const urlsToFetch = [...new Set([...directUrls, ...braveFinancialUrls])].slice(0, 4);
-    console.log('[InvNote] URLs to fetch:', urlsToFetch);
-
-    if (urlsToFetch.length > 0) {
-      const srcNote = ticker ? `（${ticker}）` : '';
-      rPlaceholder.innerHTML = `<div class="status-box"><div class="spinner"></div>株探・みんかぶ等から最新データを直接取得中${srcNote}...</div>`;
-      rPlaceholder.style.display = 'flex';
-
-      const pageResults = await Promise.allSettled(urlsToFetch.map(u => fetchPageContent(u)));
-      const fetchedTexts = pageResults
-        .map((r, i) => r.status === 'fulfilled' && r.value
-          ? `=== ${urlsToFetch[i]} ===\n${r.value}`
-          : null)
-        .filter(Boolean);
-
-      if (fetchedTexts.length) {
-        fetchedFromWeb = true;
-        webContext += `【リアルタイム取得ページ】\n${fetchedTexts.join('\n\n')}\n\n`;
-      }
-    }
-
-    if (snippetText) {
-      webContext += `【検索スニペット】\n${snippetText}`;
-    }
+    if (snippetText) webContext += `【検索スニペット（参考）】\n${snippetText}`;
   }
 
   // Step 3: Claude
